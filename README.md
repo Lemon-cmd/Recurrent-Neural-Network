@@ -1,2 +1,3 @@
-# Recurrent-Neural-Network
-Recurrent Neural Network Implementation C++
+### Recurrent Neural Network C++
+
+Still developing
