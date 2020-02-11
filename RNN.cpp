@@ -4,14 +4,20 @@
 #include <sstream>
 #include <map>
 #include <random>
-#include <vector>
 #include <algorithm>
-
-using namespace std;
+#include "MatrixCP.hpp"
+#include "MatrixAdd.hpp"
+#include "MatrixM.hpp"
+#include "MatrixMult.hpp"
 
 class RNN
 {
     private:    
+        MatrixMult mMult;
+        MatrixAdd mAdd;
+        MatrixCP mCP;
+        MM mM;
+        
         map <char, int> char_id;
         map <int, char> id_char;
         int hiddens;
@@ -29,184 +35,125 @@ class RNN
         vector <vector <double> > mW_HY;
         vector <vector <double> > mB_H;
         vector <vector <double> > mB_Y;
-            
-        const vector <double> ravel (const vector <vector <double> > &v1)
-        {
-            assert(v1.size() > 0 && "Vector is empty!");
-
-            vector <double> item;
-            for (auto &row: v1)
-            {
-                for (auto &col: row)
-                {
-                    item.push_back(col);
-                }
-            }
-
-            return item;
-        }
-
-        const vector <vector <double> > mDivide(vector <vector <double> > &v1, const double &target)
-        {
-            assert(v1.size() > 0 && "Vector is empty!");
-            vector <vector <double> > item;
-            for (auto &row : v1)
-            {
-                vector <double> elements;
-                for (auto &col: row)
-                {
-                    elements.push_back(col / target);
-                }
-                item.push_back(elements);
-            }
-
-            return item;
-        }
-
-        const double mSum(const vector <vector <double> > &v1)
-        {
-            assert(v1.size() > 0 && "Vector is empty!");
-            double sum = 0.0;
-
-            for (auto &row: v1)
-            {
-                for (auto &col: row)
-                {
-                    sum += col;
-                }
-            }
-
-            return sum;
-        }
         
-        const vector < vector <double> > mExp(const vector <vector <double> > &v1)
-        {
-            /* Perform exp(x) on Matrix */
-            assert(v1.size() > 0 && "Vector is empty!");
-            vector <vector <double> > item;
 
-            for (int r = 0; r < v1.size(); r ++)
+        void loss(const vector <int> &inputs, const vector <int> &targets, const vector <vector <double> > &hprev)
+        {
+            map <int, vector <vector <double> > > xs, hs, ys, ps;
+            vector <vector <double> > original(hprev);
+            hs[-1] = original;
+            double loss = 0.0;
+
+            for (int i = 0; i < inputs.size(); i ++)
             {
-                vector <double> elements;
-                for (int c = 0; c < v1[0].size(); c ++)
-                {
-                    elements.push_back(exp(v1[r][c]));
-                }
-                item.push_back(elements);
+                xs[i] = generateB(vocab_size, 1, 0.0);
+                mM.setItem(xs[i], inputs[i], 1);
+
+                hs[i] = mM.mTanh
+                (
+                    mAdd.matrix_add(
+                        mAdd.matrix_add(mCP.cross_product(W_XH, xs[i]), mCP.cross_product(W_HH, hs[i - 1])),
+                        B_H
+                    )
+                );
+
+                ys[i] = mAdd.matrix_add
+                (
+                    mCP.cross_product(W_HY, hs[i]),
+                    B_Y
+                );
+
+                auto ys_exp = mM.mExp(ys[i]);
+
+                ps[i] = mM.mDivide
+                (
+                    ys_exp, 
+                    mM.mSum(ys_exp)
+                );
+
+                loss += -(log(ps[i][targets[i]][0]));
+
             }
 
-            return item;
+            auto dWxh = zeros_like(W_XH);
+            auto dWhy = zeros_like(W_HY);
+            auto dWhh = zeros_like(W_HH);
+            auto dbh = zeros_like(B_H);
+            auto dby = zeros_like(B_Y);
+            auto dh_next = zeros_like(hs[0]);
+
+            for (int i = inputs.size() - 1; i >= 0; i --)
+            {
+                vector <vector <double> > dy (ps[i]);
+
+                mM.addItem(dy, targets[i], -1);
+
+                dWhy = mAdd.matrix_add
+                (
+                    dWhy,
+                    mCP.cross_product(dy, mM.transpose(hs[i]))
+                );
+
+                dby = mAdd.matrix_add(dby, dy);
+
+                
+                auto dh = mAdd.matrix_add
+                (
+                    mCP.cross_product(mM.transpose(W_HY), dy),
+                    dh_next
+                );
+
+                
+                auto dhraw = mMult.matrix_mult
+                (
+                    mM.mSubtract(1, mMult.matrix_mult(hs[i], hs[i])),
+                    dh
+                );
+
+                dbh = mAdd.matrix_add(dbh, dhraw);
+                dWxh = mAdd.matrix_add(dWxh, mCP.cross_product(dhraw, mM.transpose(xs[i])));
+                dWhh = mAdd.matrix_add(dWhh, mCP.cross_product(dhraw, mM.transpose(hs[i - 1])));
+                dh_next = mCP.cross_product(mM.transpose(W_HH), dhraw);
+                
+            }
+
         }
 
-        const vector < vector <double> > mTanh(const vector <vector <double> > &v1)
+        const string concat(const vector <int> samples)
         {
-            /* Perform Tan(x) on Matrix */
-            assert(v1.size() > 0 && "Vector is empty!");
-            vector <vector <double> > item;
+            string output = "";
 
-            for (int r = 0; r < v1.size(); r ++)
+            for (auto &id : samples)
             {
-                vector <double> elements;
-                for (int c = 0; c < v1[0].size(); c ++)
-                {
-                    elements.push_back(tan(v1[r][c]));
-                }
-                item.push_back(elements);
+                output += id_char[id];
             }
 
-            return item;
-
-        }
-
-        const vector < vector <double> > mAdd(const vector <vector <double> > &v1, const vector <vector <double> > &v2)
-        {
-            /* Matrices Addition */
-            assert(v1.size() == v2.size() && v1[0].size() == v2[0].size() && "The size of the vectors do not match!");
-            vector <vector <double> > item;
-
-            for (int r = 0; r < v1.size(); r ++)
-            {
-                vector <double> elements;
-                for (int c = 0; c < v1[0].size(); c ++)
-                {
-                    elements.push_back(v1[r][c] + v2[r][c]);
-                }
-                item.push_back(elements);
-            }
-
-            return item;
-
-        }
-
-        const vector < vector <double> > dot(const vector <vector <double> > &v1, const vector <vector <double> > &v2)
-        {
-            /* Perform Matrices Multiplication; Dot Product */
-            assert (v1[0].size() == v2.size() && "Vector 1's column size does not match Vector 2's row size!!!");
-            vector <vector <double> > item;
-            vector <double> elements;
-            
-            //start with the row in v1
-            for (auto &row : v1)
-            {
-                // loop through each item in row
-                for (int c = 0; c < row.size(); c ++)
-                {
-                    if (elements.size() > 0)
-                    {
-                        //clear elements it has elements; this is due to declaring elements outside of the loop
-                        elements.clear();
-                    }
-                    //sum
-                    double sum = 0.0;
-                    //loop through the column of v2
-                    for (int v2_c = 0; v2_c < v2[0].size(); v2_c ++)
-                    {
-                        //loop through row
-                        for (auto &v2_row: v2)
-                        {
-                            //calculate sum 
-                            sum += row[c] * v2_row[v2_c];
-                        }
-                        //push into elements vector
-                        elements.push_back(sum);
-                    }
-                }
-                //add new entry into item; new row
-                item.push_back(elements);
-            }
-            return item;
-        }
-        
-        void setItem(vector <vector <double> > &v1, const int &rowID, const double &target)
-        {
-            for (auto &col : v1[rowID])
-            {
-                col = target;
-            }
+            return output;
         }
 
         const vector <int> sample(const vector <vector <double> > &h_prev, const int &seedID, const int &m)
         {
             auto x = generateB(vocab_size, 1, 0.0);                             //generate a new bias called x
-            setItem(x, seedID, 1);                                              //set the entry at seedID equals to 1
+            mM.setItem(x, seedID, 1);                                           //set the entry at seedID equals to 1
             vector <int> samples;                                               //new samples of char IDs
 
             for (int i = 0; i < m; i ++)
-            {
-                auto h = mTanh(
-                    mAdd(
-                        mAdd(dot(W_XH, x), dot(W_HH, h_prev)), 
+            { 
+                auto h = mM.mTanh
+                (
+                    mAdd.matrix_add
+                    (
+                        mAdd.matrix_add(mCP.cross_product(W_XH, x), mCP.cross_product(W_HH, h_prev)), 
                         B_H
-                        ) 
+                    ) 
                 );
 
-                auto y = mAdd(dot(W_HY, h), B_Y);
-                auto exp_y = mExp(y);
-                auto p = mDivide(exp_y, mSum(exp_y)); 
+                auto y = mAdd.matrix_add(mCP.cross_product(W_HY, h), B_Y);
+                auto exp_y = mM.mExp(y);
+                auto p = mM.mDivide(exp_y, mM.mSum(exp_y)); 
                 auto ix = rand() % (vocab_size - 1);
                 x = generateB(vocab_size, 1, 0.0);
-                setItem(x, ix, 1);
-
+                mM.setItem(x, ix, 1);
                 samples.push_back(ix);
             }
 
@@ -316,6 +263,10 @@ class RNN
         {
             hiddens = hidden_size;
             sequence_length = seq_length;
+            mMult = MatrixMult();
+            mAdd = MatrixAdd();
+            mCP = MatrixCP();
+            mM = MM();
         }  
         
         void load(const string filename)
@@ -348,9 +299,7 @@ class RNN
                 }
                 data_size ++;
             }
-
             initalized();
-
         }
 
         void learn()
@@ -372,22 +321,28 @@ class RNN
 
                 if (n % 1000 == 0)
                 {
-                    continue;
-                }
+                    auto samples = sample(h_prev, inputs[0], 200);
+                    auto text = concat(samples);
 
+                    cout << text << endl;
+                }
             }
         }
 
         void display()
         {
-            //vector < vector <double> > x = generateB(hiddens, 1, 0.0);  
-           
-            auto test = sample(B_H, 1, 100);
-            for (auto &col : test)
-            {
-                cout << col << endl;
-            }
-            
+            auto x = generateB(hiddens, 1, 5); 
+            auto x2 = generateB(hiddens, 1, 5); 
+            auto y = generateB(vocab_size, 1, 0.0);
+
+            auto test = sample(x, 10, 200);
+            int p = 0;
+
+            vector <int> inputs = getID(0, 25); 
+            vector <int> targets = getID(p + 1, 25);
+
+            //cout << concat(test) << endl;
+            loss(inputs, targets, x);
         }
 };
 
