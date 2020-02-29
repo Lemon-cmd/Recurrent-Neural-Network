@@ -1,323 +1,308 @@
+using namespace std;
+#include <cassert>
 #include <string> 
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <vector>
 #include <map>
 #include <random>
-#include <algorithm>
-#include "MatrixCP.hpp"
-#include "MatrixAdd.hpp"
-#include "MatrixM.hpp"
-#include "MatrixMult.hpp"
+#include <eigen3/Eigen/Core>
+#include <eigen3/Eigen/Dense>
+
+using namespace Eigen;
 
 class RNN
 {
-    private:    
-        MatrixMult mMult;
-        MatrixAdd mAdd;
-        MatrixCP mCP;
-        MM mM;
-        
-        map <char, int> char_id;
-        map <int, char> id_char;
-        int hiddens;
-        int sequence_length; 
-
-        int data_size;
-        int vocab_size;
-        vector <vector <double> > W_XH;
-        vector <vector <double> > W_HH;
-        vector <vector <double> > W_HY;
-        vector <vector <double> > B_H;
-        vector <vector <double> > B_Y;
-        vector <vector <double> > mW_XH;
-        vector <vector <double> > mW_HH;
-        vector <vector <double> > mW_HY;
-        vector <vector <double> > mB_H;
-        vector <vector <double> > mB_Y;
-        
-
-        void loss(const vector <int> &inputs, const vector <int> &targets, const vector <vector <double> > &hprev)
+    private: 
+        struct loss_result
         {
-            map <int, vector <vector <double> > > xs, hs, ys, ps;
-            vector <vector <double> > original(hprev);
-            hs[-1] = original;
-            double loss = 0.0;
+            double loss;
+            MatrixXd dWxh;
+            MatrixXd dWhh;
+            MatrixXd dWhy;
+            MatrixXd dbh;
+            MatrixXd dby;
+            MatrixXd hs;            
+        }; 
 
+        vector <string> data;
+        int hiddens;
+        int sequence_length;
+        int data_size; 
+        int vocab_size;
+
+        MatrixXd mWXH;
+        MatrixXd mWHH;
+        MatrixXd mWHY;
+        MatrixXd mBH;
+        MatrixXd mBY;
+
+        MatrixXd W_XH;
+        MatrixXd W_HH;
+        MatrixXd W_HY;
+        MatrixXd BH; 
+        MatrixXd BY;
+
+        map <string, int> char_id;
+        map <int, string> id_char;
+
+        void setItem(MatrixXd &m, const int row_num, const double target)
+        {
+            for (auto item = m.row(row_num).data(); item< m.row(row_num).data() + m.size(); item += m.outerStride()) 
+            {
+                *item = target;
+            }      
+        }
+
+        void clip(const double min, const double max, MatrixXd &target)
+        {
+            for (int r = 0; r < target.rows(); r ++)
+            {
+                for (auto item = target.row(r).data(); item < target.row(r).data() + target.size(); item += target.outerStride()) 
+                {
+                    *item = check(min, max, *item);
+                }   
+            }
+        }
+
+        void addItem(MatrixXd &m, const int row_num, const double target)
+        {
+            for (auto item = m.row(row_num).data(); item< m.row(row_num).data() + m.size(); item += m.outerStride()) 
+            {
+                *item += target;
+            }   
+        }
+
+        double check (const double min, const double max, double &target)
+        {
+            if (target > max)
+            {
+                return max;
+            }
+            else if (target < min)
+            {
+                return min;
+            }
+            else 
+            {
+                return target;
+            }
+        }
+
+        loss_result* loss(const vector <int> &inputs, const vector <int> &targets, const MatrixXd &hprev)
+        {
+            map <int, MatrixXd > xs, hs, ys, ps;
+            MatrixXd original (hprev);
+            hs[-1] = original;
+
+            double loss = 0.0;
             for (int i = 0; i < inputs.size(); i ++)
             {
-                xs[i] = generateB(vocab_size, 1, 0.0);
-                mM.setItem(xs[i], inputs[i], 1);
+                xs[i] = MatrixXd::Zero(vocab_size, 1);
+                setItem(xs[i], inputs[i], 1); 
+                hs[i] = ((W_XH * xs[i]) + (W_HH * hs[i - 1]) + BH).unaryExpr<double(*)(double)>(&tanh);
+                
+                ys[i] = W_HY * hs[i] + BY;
 
-                hs[i] = mM.mTanh
-                (
-                    mAdd.matrix_add(
-                        mAdd.matrix_add(mCP.cross_product(W_XH, xs[i]), mCP.cross_product(W_HH, hs[i - 1])),
-                        B_H
-                    )
-                );
+                MatrixXd ys_exp = ys[i].unaryExpr<double(*)(double)>(&exp);
+            
+                ps[i].noalias() = ys_exp / ys_exp.sum();
 
-                ys[i] = mAdd.matrix_add
-                (
-                    mCP.cross_product(W_HY, hs[i]),
-                    B_Y
-                );
-
-                auto ys_exp = mM.mExp(ys[i]);
-
-                ps[i] = mM.mDivide
-                (
-                    ys_exp, 
-                    mM.mSum(ys_exp)
-                );
-
-                loss += -(log(ps[i][targets[i]][0]));
-
+                loss += -log(ps[i].coeff(targets[i], 0));
             }
 
-            auto dWxh = zeros_like(W_XH);
-            auto dWhy = zeros_like(W_HY);
-            auto dWhh = zeros_like(W_HH);
-            auto dbh = zeros_like(B_H);
-            auto dby = zeros_like(B_Y);
-            auto dh_next = zeros_like(hs[0]);
-
+            MatrixXd dWxh = MatrixXd::Zero(W_XH.rows(), W_XH.cols());
+            MatrixXd dWhy = MatrixXd::Zero(W_HY.rows(), W_HY.cols());
+            MatrixXd dWhh = MatrixXd::Zero(W_HH.rows(), W_HH.cols());
+            MatrixXd dbh = MatrixXd::Zero(BH.rows(), BH.cols());
+            MatrixXd dby = MatrixXd::Zero(BY.rows(), BY.cols());
+            MatrixXd dh_next = MatrixXd::Zero(hs[0].rows(), hs[0].cols());
+            
             for (int i = inputs.size() - 1; i >= 0; i --)
-            {
-                vector <vector <double> > dy (ps[i]);
+            { 
+                MatrixXd dy(ps[i]);
+                addItem(dy, targets[i], -1.0);
 
-                mM.addItem(dy, targets[i], -1);
+                dWhy += (dy * hs[i].transpose());
+                dby.noalias() += dy;
 
-                dWhy = mAdd.matrix_add
-                (
-                    dWhy,
-                    mCP.cross_product(dy, mM.transpose(hs[i]))
-                );
+                MatrixXd dh = ((W_HY.transpose() * dy) + dh_next);
+                MatrixXd dhraw = ((1 - (hs[i].array() * hs[i].array())).array() * dh.array()); 
 
-                dby = mAdd.matrix_add(dby, dy);
-
-                
-                auto dh = mAdd.matrix_add
-                (
-                    mCP.cross_product(mM.transpose(W_HY), dy),
-                    dh_next
-                );
-
-                
-                auto dhraw = mMult.matrix_mult
-                (
-                    mM.mSubtract(1, mMult.matrix_mult(hs[i], hs[i])),
-                    dh
-                );
-
-                dbh = mAdd.matrix_add(dbh, dhraw);
-                dWxh = mAdd.matrix_add(dWxh, mCP.cross_product(dhraw, mM.transpose(xs[i])));
-                dWhh = mAdd.matrix_add(dWhh, mCP.cross_product(dhraw, mM.transpose(hs[i - 1])));
-                dh_next = mCP.cross_product(mM.transpose(W_HH), dhraw);
-                
+                dbh.noalias() += dhraw;
+                dWxh += (dhraw * xs[i].transpose());
+                dWhh += (dhraw * hs[i - 1].transpose());
+                dh_next = (W_HH.transpose() * dhraw);
             }
+            
+            /* Clip Any values that are not between -5 & 5 */
+            clip(-5, 5, dWxh);
+            clip(-5, 5, dWhh);
+            clip(-5, 5, dWhy);
+            clip(-5, 5, dbh);
+            clip(-5, 5, dby);
+            
+            loss_result* item = new loss_result();
+            item->loss = loss; item->dbh = dbh; item->dby = dby;
+            item->dWhh = dWhh; item->dWhy = dWhy; item->dWxh = dWxh;
+            item->hs = hs[inputs.size() - 1];
 
+            return item;
         }
 
-        const string concat(const vector <int> samples)
+        const vector <int> sample(const MatrixXd &h_prev, const int &seedID, const int &m)
         {
-            string output = "";
-
-            for (auto &id : samples)
-            {
-                output += id_char[id];
-            }
-
-            return output;
-        }
-
-        const vector <int> sample(const vector <vector <double> > &h_prev, const int &seedID, const int &m)
-        {
-            auto x = generateB(vocab_size, 1, 0.0);                             //generate a new bias called x
-            mM.setItem(x, seedID, 1);                                           //set the entry at seedID equals to 1
-            vector <int> samples;                                               //new samples of char IDs
-
+            MatrixXd x = MatrixXd::Zero(vocab_size, 1);                          //generate a new bias called x
+            setItem(x, seedID, 1);                                           //set the entry at seedID equals to 1
+            vector <int> samples;                                            //new samples of char IDs
             for (int i = 0; i < m; i ++)
             { 
-                auto h = mM.mTanh
-                (
-                    mAdd.matrix_add
-                    (
-                        mAdd.matrix_add(mCP.cross_product(W_XH, x), mCP.cross_product(W_HH, h_prev)), 
-                        B_H
-                    ) 
-                );
+                MatrixXd h = ((W_XH * x) + (W_HH * h_prev)) + BH;
+                h = h.unaryExpr<double(*)(double)>(&tanh);
 
-                auto y = mAdd.matrix_add(mCP.cross_product(W_HY, h), B_Y);
-                auto exp_y = mM.mExp(y);
-                auto p = mM.mDivide(exp_y, mM.mSum(exp_y)); 
-                auto ix = rand() % (vocab_size - 1);
-                x = generateB(vocab_size, 1, 0.0);
-                mM.setItem(x, ix, 1);
+                MatrixXd y = (W_HY * h) + BY;
+                MatrixXd exp_y = y.unaryExpr<double(*)(double)>(&exp);
+
+                MatrixXd p = exp_y / exp_y.sum();
+
+                int ix = rand() % (vocab_size);
+                
+                x = MatrixXd::Zero(vocab_size, 1);
+
+                setItem(x, ix, 1);
+
                 samples.push_back(ix);
             }
 
             return samples;
-
         }
-
-        const vector <int> getID(const int &p, const int &extra)
+        
+        const vector <int> getID(const int &min, const int &max)
         {
-            /* Get a list of characters based on the range of p and sequence length */
+            // Get a list of characters based on the range of p and sequence length 
             vector <int> item;
-            int count = p;
 
-            for (auto &key : char_id)
+            #pragma omp parallel
             {
-                if (count < sequence_length + extra)
+                #pragma omp declare reduction(merge : vector <int>  : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+                #pragma omp for reduction(merge: item)
+                for (int c = min; c < max; c ++)
                 {
-                    item.push_back(key.second);
-                    count ++;
-                }
-                else
-                {
-                    break;
+                    #pragma omp critical
+                    item.push_back(char_id[data[c]]);
                 }
             }
             return item;
         }
 
-        const vector < vector <double> > generateW (const int &row_size, const int &col_size, const double max_range)
+        const string concat(const vector <int> samples)
         {
-            /* Generate Random Weight Method */
-            vector < vector <double> > weights;
-
-            for (int r = 0; r < row_size; r ++)
+            string output = "";
+            #pragma omp parallel 
             {
-                vector <double> entry;
-                for (int c = 0; c < col_size; c ++)
+                #pragma omp declare reduction(concat: string : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+                #pragma omp for reduction(concat: output)
+                for (auto &id : samples)
                 {
-                    //push back random weight onto current row
-                    entry.push_back( (double(rand()) / double(RAND_MAX)) * max_range);
+                    #pragma omp update
+                    output = output + id_char[id];
                 }
-                //push into the weights
-                weights.push_back(entry);
             }
 
-            return weights;
-        }
-
-        const vector <vector <double> > generateB (const int &row_size, const int &col_size, const double &bias_value)
-        {
-            /* Generate Biases */
-            vector < vector <double> > biases;
-            for (int r = 0; r < row_size; r ++)
-            {
-                //create entry and push into biases
-                vector <double> entry;
-                for (int c = 0; c < col_size; c ++)
-                {
-                    entry.push_back(bias_value);
-                }
-
-                biases.push_back(entry);
-            }
-            
-            return biases;
-        }
-
-        const vector <vector <double> > zeros_like(const vector <vector <double> > &target)
-        {
-            /* Copy the dimension of target vectors and create a new vector with only zeroes */
-            int row_size = target.size();
-            int col_size = target[0].size();
-
-            vector <vector <double> > zeroes;
-
-            for (int r = 0; r < row_size; r ++)
-            {
-                vector <double> entry;
-                for (int c = 0; c < col_size; c ++)
-                {
-                    entry.push_back(0.0);
-                }
-
-                zeroes.push_back(entry);
-            }
-            return zeroes;
+            return output;
         }
 
         void initalized()
         {
-            W_XH = generateW(hiddens, vocab_size, 0.01);
-            W_HH = generateW(hiddens, hiddens, 0.01);
-            W_HY = generateW(vocab_size, hiddens, 0.01);
-            B_H = generateB(hiddens, 1, 0.0);
-            B_Y = generateB(vocab_size, 1, 0.0);
-
-            mW_XH = zeros_like(W_XH);
-            mW_HH = zeros_like(W_HH);
-            mW_HY = zeros_like(W_HY);
-
-            mB_H = zeros_like(B_H); 
-            mB_Y = zeros_like(B_Y); 
+            W_XH = MatrixXd::Random(hiddens, vocab_size) * 0.01;
+            W_HH = MatrixXd::Random(hiddens, hiddens) * 0.01;
+            W_HY = MatrixXd::Random(vocab_size, hiddens) * 0.01;
+            BH = MatrixXd::Zero(hiddens, 1);
+            BY = MatrixXd::Zero(vocab_size, 1);
         }
 
-    public:   
+    public: 
         RNN(const int &hidden_size, const int &seq_length)
         {
             hiddens = hidden_size;
             sequence_length = seq_length;
-            mMult = MatrixMult();
-            mAdd = MatrixAdd();
-            mCP = MatrixCP();
-            mM = MM();
         }  
-        
+
         void load(const string filename)
         {
             /* Load File and Enumerate through each character in the text file; get unique char and assign their ID */
             ifstream file(filename);    // grab file
             string line;                // a string for holding  current line
             int count = 0;              // count variable
-            data_size = 0;
-            vocab_size = 0;
+            vector <string> corpus;
 
-            // loop through the file
-            while (getline(file, line))
+            while(getline(file, line))
             {
-                //if the current line is not empty
-                if (!line.empty())
-                {
-                    //loop through each line and find character
-                    for (int c = 0; c < line.size(); c ++)
-                    {
-                       if (char_id.find(line[c]) == char_id.end())
-                       {
-                            //assign each char a special ID
-                            char_id[line[c]] = count;
-                            id_char[count] = line[c];
-                            count ++;
-                            vocab_size ++;
-                       }
-                   }       
-                }
-                data_size ++;
+                corpus.push_back(line);
             }
+
+            file.close();
+
+            char_id["\n"] = count; id_char[count] = "\n"; count ++;
+
+            for (auto &line: corpus)
+            {
+                int line_size = line.size();
+                if (line_size > 0)
+                {
+                    for (int c = 0; c < line_size; c++)
+                    {
+                        string current (1, line[c]);
+                        data.push_back(current);
+
+                        if (char_id.find(current) == char_id.end())
+                        {
+                            char_id[current] = count;
+                            id_char[count] = current;
+                            count ++;
+                        }
+                    }
+                    data.push_back("\n");
+                }
+                else
+                {
+                    data.push_back("\n");
+                }
+            }
+
+            data_size = data.size();
+            vocab_size = char_id.size();
             initalized();
         }
 
         void learn()
-        {            
-            int n, p = 0;
+        {
 
-            vector <vector <double> > h_prev;
+            mWXH = MatrixXd::Zero(W_XH.rows(), W_XH.cols());
+            mWHH = MatrixXd::Zero(W_HH.rows(), W_HH.cols());
+            mWHY = MatrixXd::Zero(W_HY.rows(), W_HY.cols());
+            mBH = MatrixXd::Zero(BH.rows(), BH.cols());
+            mBY = MatrixXd::Zero(BY.rows(), BY.cols());
+
+            int n = 0;
+            int p = 0;
+
+            long double smooth_loss = -log(1.0/ double(vocab_size)) * double(sequence_length); 
+            long double learning_rate = 1 * exp(-1);
             
+            MatrixXd h_prev; 
+
             while (true)
             {
-                if (p + sequence_length >= data_size or n == 0)
+                if ( ((p + sequence_length + 1) >= data_size) or (n == 0))
                 {
-                    h_prev = generateB(hiddens, 1, 0.0);
+                    h_prev = MatrixXd::Zero(hiddens, 1);
                     p = 0;
                 }
 
-                vector <int> inputs = getID(p, 0); 
-                vector <int> targets = getID(p + 1, 1);
+                vector <int> inputs = getID(p, p + sequence_length); 
+                vector <int> targets = getID(p + 1, p + sequence_length + 1);
 
                 if (n % 1000 == 0)
                 {
@@ -325,36 +310,52 @@ class RNN
                     auto text = concat(samples);
 
                     cout << text << endl;
+                    cout << "\n";
                 }
+
+                auto item = loss(inputs, targets, h_prev);
+                smooth_loss = smooth_loss * 0.999 + item->loss * 0.001;
+
+                if (n % 1000 == 0)
+                {
+                    cout << "Iteration #: "  << n << " Loss: " << smooth_loss << endl;
+                }
+
+                p += sequence_length;
+                n++;
+
+                mWXH.noalias() += MatrixXd(item->dWxh.array() * item->dWxh.array());
+                W_XH += MatrixXd(-learning_rate * item->dWxh.array() / sqrt(mWXH.array() + 1e-8));
+
+                mWHH.noalias() += MatrixXd(item->dWhh.array() * item->dWhh.array());
+                W_HH += MatrixXd(-learning_rate * item->dWhh.array() / sqrt(mWHH.array() + 1e-8));
+        
+                mWHY.noalias() += MatrixXd(item->dWhy.array() * item->dWhy.array());
+                W_HY += MatrixXd(-learning_rate * item->dWhy.array() / sqrt(mWHY.array() + 1e-8));
+
+                mBH.noalias() += MatrixXd(item->dbh.array() * item->dbh.array());
+                BH += MatrixXd(-learning_rate * item->dbh.array() / sqrt(mBH.array() + 1e-8));
+
+                mBY.noalias() += MatrixXd(item->dby.array() * item->dby.array());
+                BY += MatrixXd(-learning_rate * item->dby.array() / sqrt(mBY.array() + 1e-8));
+
+                free(item);
             }
+            
         }
 
-        void display()
-        {
-            auto x = generateB(hiddens, 1, 5); 
-            auto x2 = generateB(hiddens, 1, 5); 
-            auto y = generateB(vocab_size, 1, 0.0);
-
-            auto test = sample(x, 10, 200);
-            int p = 0;
-
-            vector <int> inputs = getID(0, 25); 
-            vector <int> targets = getID(p + 1, 25);
-
-            //cout << concat(test) << endl;
-            loss(inputs, targets, x);
-        }
 };
 
 int main()
 {
     int hidden_size = 120;
-    int seq_length = 25;
-    double learning_rate = 1.0 * exp(-1);
-    double smooth_loss = -log(1.0/100) * double(seq_length); 
+    int seq_length = 50;
 
-    RNN test = RNN(hidden_size, seq_length);
-    test.load("input.txt");
-    test.display();
+    Eigen::initParallel();
+    RNN rnn = RNN(hidden_size, seq_length);
+    rnn.load("code_corpus.txt");
+    rnn.learn();
+    
 
 }
+
