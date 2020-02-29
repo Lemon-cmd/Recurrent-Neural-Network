@@ -1,0 +1,32 @@
+#ifndef M_ADD_HPP
+#define M_ADD_HPP
+
+vector <vector <double> > matrix_add(vector <vector <double> > v1, vector <vector <double> > v2)
+{
+    assert(v1.size() == v2.size() && v1[0].size() == v2[0].size() && "Both Vectors must have the same size");
+    int height = v1.size();
+    int width = v1[0].size();
+
+    int r = 0;
+    #pragma omp parallel 
+    {
+        #pragma omp for
+        for (auto &row : v1)
+        {
+            #pragma omp declare reduction(add : std::vector<double> : \
+                                std::transform(omp_out.begin(), omp_out.end(), omp_in.begin(), omp_out.begin(), std::plus<double>())) \
+                        initializer(omp_priv = decltype(omp_orig)(omp_orig.size()))
+            #pragma omp parallel for reduction(add : row)
+            for (int c = 0; c < width; c ++)
+            {
+                #pragma omp atomic update
+                row[c] += v2[r][c];
+            }
+            r ++;
+        }
+    }
+    
+    return v1;
+}
+
+#endif
