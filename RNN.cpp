@@ -168,11 +168,11 @@ class RNN
             }
             
             /* Clip values in matrices to prevent gradient explosion */
-            clip(-5, 5, dWxh);
-            clip(-5, 5, dWhh);
-            clip(-5, 5, dWhy);
-            clip(-5, 5, dbh);
-            clip(-5, 5, dby);
+            clip(-10, 10, dWxh);
+            clip(-10, 10, dWhh);
+            clip(-10, 10, dWhy);
+            clip(-10, 10, dbh);
+            clip(-10, 10, dby);
             
             loss_result* item = new loss_result();
             item->loss = loss; item->dbh = dbh; item->dby = dby;
@@ -336,7 +336,7 @@ class RNN
                     auto samples = sample(h_prev, inputs[0], 200);
                     auto text = concat(samples);
 
-                    cout << text << endl;
+                    cout << "\n" << text << endl;
                     cout << "\n";
                 }
 
