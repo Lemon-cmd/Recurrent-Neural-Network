@@ -6,7 +6,9 @@ using namespace std;
 #include <sstream>
 #include <vector>
 #include <map>
+#include <algorithm>
 #include <random>
+#include <boost/random/discrete_distribution.hpp>
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Dense>
 
@@ -27,10 +29,13 @@ class RNN
         }; 
 
         vector <string> data;
+        vector <int> vocab_samples;
+
         int hiddens;
         int sequence_length;
         int data_size; 
         int vocab_size;
+
 
         MatrixXd mWXH;
         MatrixXd mWHH;
@@ -90,6 +95,31 @@ class RNN
             }
         }
 
+        const vector <double> ravel(MatrixXd &target)
+        {
+            vector <double> p;
+            
+            for (int r = 0; r < target.rows(); r ++)
+            {
+                for (auto item = target.row(r).data(); item < target.row(r).data() + target.size(); item += target.outerStride())
+                {
+                    p.push_back(*item);
+                }
+            }
+
+            return p;
+        }
+
+        const int choice (vector <double> &p)
+        {
+            random_device rng;
+            mt19937 gen(rng());
+            vector <double> out;
+            boost::random::discrete_distribution<> dist (p.begin(), p.end());
+            int randomNumber = dist(gen);
+            return randomNumber;
+        }
+
         loss_result* loss(const vector <int> &inputs, const vector <int> &targets, const MatrixXd &hprev)
         {
             map <int, MatrixXd > xs, hs, ys, ps;
@@ -100,14 +130,15 @@ class RNN
             for (int i = 0; i < inputs.size(); i ++)
             {
                 xs[i] = MatrixXd::Zero(vocab_size, 1);
-                setItem(xs[i], inputs[i], 1); 
+                xs[i].row(inputs[i]).array() = 1;
+
                 hs[i] = ((W_XH * xs[i]) + (W_HH * hs[i - 1]) + BH).unaryExpr<double(*)(double)>(&tanh);
                 
-                ys[i] = W_HY * hs[i] + BY;
+                ys[i] = (W_HY * hs[i]) + BY;
 
                 MatrixXd ys_exp = ys[i].unaryExpr<double(*)(double)>(&exp);
             
-                ps[i].noalias() = ys_exp / ys_exp.sum();
+                ps[i] = ys_exp / ys_exp.sum();
 
                 loss += -log(ps[i].coeff(targets[i], 0));
             }
@@ -122,15 +153,15 @@ class RNN
             for (int i = inputs.size() - 1; i >= 0; i --)
             { 
                 MatrixXd dy(ps[i]);
-                addItem(dy, targets[i], -1.0);
+                dy.row(targets[i]) = dy.row(targets[i]).array() - 1.0;
 
                 dWhy += (dy * hs[i].transpose());
-                dby.noalias() += dy;
+                dby += dy;
 
                 MatrixXd dh = ((W_HY.transpose() * dy) + dh_next);
                 MatrixXd dhraw = ((1 - (hs[i].array() * hs[i].array())).array() * dh.array()); 
 
-                dbh.noalias() += dhraw;
+                dbh += dhraw;
                 dWxh += (dhraw * xs[i].transpose());
                 dWhh += (dhraw * hs[i - 1].transpose());
                 dh_next = (W_HH.transpose() * dhraw);
@@ -153,73 +184,59 @@ class RNN
 
         const vector <int> sample(const MatrixXd &h_prev, const int &seedID, const int &m)
         {
-            MatrixXd x = MatrixXd::Zero(vocab_size, 1);                          //generate a new bias called x
-            setItem(x, seedID, 1);                                           //set the entry at seedID equals to 1
+            MatrixXd x = MatrixXd::Zero(vocab_size, 1);                        //generate a new bias called x
+            x.row(seedID).array() = 1.0;                                      //set the entry at seedID equals to 1
             vector <int> samples;                                            //new samples of char IDs
+
             for (int i = 0; i < m; i ++)
             { 
-                MatrixXd h = ((W_XH * x) + (W_HH * h_prev)) + BH;
+                MatrixXd h = (W_XH * x) + (W_HH * h_prev) + BH;
                 h = h.unaryExpr<double(*)(double)>(&tanh);
 
-                MatrixXd y = (W_HY * h) + BY;
+                MatrixXd y = W_HY * h + BY;
                 MatrixXd exp_y = y.unaryExpr<double(*)(double)>(&exp);
 
                 MatrixXd p = exp_y / exp_y.sum();
+                vector <double> probabilities = ravel(p);
 
-                int ix = rand() % (vocab_size);
-                
+                int ix = choice(probabilities);
+
                 x = MatrixXd::Zero(vocab_size, 1);
 
-                setItem(x, ix, 1);
-
+                x.row(ix).array() = 1.0;
                 samples.push_back(ix);
             }
 
             return samples;
         }
         
-        const vector <int> getID(const int &min, const int &max)
+        const vector <int> getID(const int min, const int max)
         {
             // Get a list of characters based on the range of p and sequence length 
             vector <int> item;
-
-            #pragma omp parallel
+            #pragma omp declare reduction(merge : vector <int> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+            #pragma omp parallel for reduction(merge : item)
+            for (int c = min; c < max; c ++)
             {
-                #pragma omp declare reduction(merge : vector <int>  : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
-                #pragma omp for reduction(merge: item)
-                for (int c = min; c < max; c ++)
-                {
-                    #pragma omp critical
-                    item.push_back(char_id[data[c]]);
-                }
+                #pragma omp critical
+                item.push_back(char_id[data[c]]);
             }
+            
             return item;
         }
 
         const string concat(const vector <int> samples)
         {
             string output = "";
-            #pragma omp parallel 
+            #pragma omp declare reduction(concat : string : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+            #pragma omp parallel for reduction(concat : output)
+            for (int i = 0; i < samples.size(); i++)
             {
-                #pragma omp declare reduction(concat: string : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
-                #pragma omp for reduction(concat: output)
-                for (auto &id : samples)
-                {
-                    #pragma omp update
-                    output = output + id_char[id];
-                }
+                #pragma omp update
+                output += id_char[samples[i]];
             }
 
             return output;
-        }
-
-        void initalized()
-        {
-            W_XH = MatrixXd::Random(hiddens, vocab_size) * 0.01;
-            W_HH = MatrixXd::Random(hiddens, hiddens) * 0.01;
-            W_HY = MatrixXd::Random(vocab_size, hiddens) * 0.01;
-            BH = MatrixXd::Zero(hiddens, 1);
-            BY = MatrixXd::Zero(vocab_size, 1);
         }
 
     public: 
@@ -263,6 +280,7 @@ class RNN
                             count ++;
                         }
                     }
+
                     data.push_back("\n");
                 }
                 else
@@ -273,7 +291,20 @@ class RNN
 
             data_size = data.size();
             vocab_size = char_id.size();
-            initalized();
+            
+            #pragma omp declare reduction (merge : vector <int> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+            #pragma omp parallel for reduction (merge : vocab_samples)
+            for (int i = 0; i < vocab_size; i ++)
+            {
+                #pragma omp critical
+                vocab_samples.push_back(i);
+            }
+
+            W_XH = MatrixXd::Random(hiddens, vocab_size) * 0.01;
+            W_HH = MatrixXd::Random(hiddens, hiddens) * 0.01;
+            W_HY = MatrixXd::Random(vocab_size, hiddens) * 0.01;
+            BH = MatrixXd::Zero(hiddens, 1);
+            BY = MatrixXd::Zero(vocab_size, 1);
         }
 
         void learn()
@@ -289,7 +320,7 @@ class RNN
             int p = 0;
 
             long double smooth_loss = -log(1.0/ double(vocab_size)) * double(sequence_length); 
-            long double learning_rate = 1 * exp(-1);
+            long double learning_rate = 0.001;
             
             MatrixXd h_prev; 
 
@@ -304,7 +335,7 @@ class RNN
                 vector <int> inputs = getID(p, p + sequence_length); 
                 vector <int> targets = getID(p + 1, p + sequence_length + 1);
 
-                if (n % 1000 == 0)
+                if (n % 100 == 0)
                 {
                     auto samples = sample(h_prev, inputs[0], 200);
                     auto text = concat(samples);
@@ -313,16 +344,14 @@ class RNN
                     cout << "\n";
                 }
 
-                auto item = loss(inputs, targets, h_prev);
+                loss_result* item = loss(inputs, targets, h_prev);
+
                 smooth_loss = smooth_loss * 0.999 + item->loss * 0.001;
 
-                if (n % 1000 == 0)
+                if (n % 100 == 0)
                 {
                     cout << "Iteration #: "  << n << " Loss: " << smooth_loss << endl;
                 }
-
-                p += sequence_length;
-                n++;
 
                 mWXH.noalias() += MatrixXd(item->dWxh.array() * item->dWxh.array());
                 W_XH += MatrixXd(-learning_rate * item->dWxh.array() / sqrt(mWXH.array() + 1e-8));
@@ -340,22 +369,21 @@ class RNN
                 BY += MatrixXd(-learning_rate * item->dby.array() / sqrt(mBY.array() + 1e-8));
 
                 free(item);
+                
+                p += sequence_length;
+                n++;
             }
-            
         }
-
 };
 
 int main()
 {
     int hidden_size = 120;
-    int seq_length = 50;
+    int seq_length = 25;
 
     Eigen::initParallel();
     RNN rnn = RNN(hidden_size, seq_length);
     rnn.load("code_corpus.txt");
     rnn.learn();
-    
-
 }
 
