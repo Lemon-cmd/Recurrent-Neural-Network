@@ -337,8 +337,8 @@ class RNN
 
                 if (n % 100 == 0)
                 {
-                    static auto samples = sample(h_prev, inputs[0], 200);
-                    static auto text = concat(samples);
+                    auto samples = sample(h_prev, inputs[0], 200);
+                    auto text = concat(samples);
 
                     cout << text << endl;
                     cout << "\n";
