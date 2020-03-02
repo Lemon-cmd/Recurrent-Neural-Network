@@ -214,9 +214,9 @@ class RNN
         {
             // Get a list of characters based on the range of p and sequence length 
             vector <int> item;
-      
             for (int c = min; c < max; c ++)
             {
+                #pragma omp critical
                 item.push_back(char_id[data[c]]);
             }
             
@@ -226,9 +226,11 @@ class RNN
         const string concat(const vector <int> samples)
         {
             string output = "";
-         
+            #pragma omp declare reduction(merge : string : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+            #pragma omp parallel for reduction(merge : output)
             for (int i = 0; i < samples.size(); i++)
             {
+                #pragma omp critical
                 output += id_char[samples[i]];
             }
 
@@ -312,8 +314,7 @@ class RNN
             mBH = MatrixXd::Zero(BH.rows(), BH.cols());
             mBY = MatrixXd::Zero(BY.rows(), BY.cols());
 
-            int n = 0;
-            int p = 0;
+            int n, p = 0;
 
             long double smooth_loss = -log(1.0/ double(vocab_size)) * double(sequence_length); 
             long double learning_rate = 1 * exp(-1);
@@ -347,6 +348,7 @@ class RNN
                 if (n % 100 == 0)
                 {
                     cout << "Iteration #: "  << n << " Loss: " << smooth_loss << endl;
+       
                 }
 
                 mWXH.noalias() += MatrixXd(item->dWxh.array() * item->dWxh.array());
@@ -382,4 +384,3 @@ int main()
     rnn.load("input.txt");
     rnn.learn();
 }
-
