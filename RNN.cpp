@@ -214,11 +214,9 @@ class RNN
         {
             // Get a list of characters based on the range of p and sequence length 
             vector <int> item;
-            #pragma omp declare reduction(merge : vector <int> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
-            #pragma omp parallel for reduction(merge : item)
+      
             for (int c = min; c < max; c ++)
             {
-                #pragma omp critical
                 item.push_back(char_id[data[c]]);
             }
             
@@ -228,11 +226,9 @@ class RNN
         const string concat(const vector <int> samples)
         {
             string output = "";
-            #pragma omp declare reduction(concat : string : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
-            #pragma omp parallel for reduction(concat : output)
+         
             for (int i = 0; i < samples.size(); i++)
             {
-                #pragma omp update
                 output += id_char[samples[i]];
             }
 
