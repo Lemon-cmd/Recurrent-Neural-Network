@@ -315,8 +315,8 @@ class RNN
             int n = 0;
             int p = 0;
 
-            double smooth_loss = -log(1.0/ double(vocab_size)) * double(sequence_length); 
-            double learning_rate = 1 * exp(-1);
+            long double smooth_loss = -log(1.0/ double(vocab_size)) * double(sequence_length); 
+            long double learning_rate = 1 * exp(-1);
             
             MatrixXd h_prev; 
 
