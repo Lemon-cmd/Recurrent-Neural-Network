@@ -29,7 +29,6 @@ class RNN
         }; 
 
         vector <string> data;
-        vector <int> vocab_samples;
 
         int hiddens;
         int sequence_length;
@@ -290,14 +289,6 @@ class RNN
             data_size = data.size();
             vocab_size = char_id.size();
             
-            #pragma omp declare reduction (merge : vector <int> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
-            #pragma omp parallel for reduction (merge : vocab_samples)
-            for (int i = 0; i < vocab_size; i ++)
-            {
-                #pragma omp critical
-                vocab_samples.push_back(i);
-            }
-
             W_XH = MatrixXd::Random(hiddens, vocab_size) * 0.01;
             W_HH = MatrixXd::Random(hiddens, hiddens) * 0.01;
             W_HY = MatrixXd::Random(vocab_size, hiddens) * 0.01;
