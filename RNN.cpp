@@ -114,8 +114,8 @@ class RNN
         {
             random_device rng;
             mt19937 gen(rng());
-            vector <double> out;
             boost::random::discrete_distribution<> dist (p.begin(), p.end());
+
             int randomNumber = dist(gen);
             return randomNumber;
         }
@@ -156,18 +156,18 @@ class RNN
                 dy.row(targets[i]) = dy.row(targets[i]).array() - 1.0;
 
                 dWhy += (dy * hs[i].transpose());
-                dby += dy;
+                dby.noalias() += dy;
 
                 MatrixXd dh = ((W_HY.transpose() * dy) + dh_next);
                 MatrixXd dhraw = ((1 - (hs[i].array() * hs[i].array())).array() * dh.array()); 
 
-                dbh += dhraw;
+                dbh.noalias() += dhraw;
                 dWxh += (dhraw * xs[i].transpose());
                 dWhh += (dhraw * hs[i - 1].transpose());
                 dh_next = (W_HH.transpose() * dhraw);
             }
             
-            /* Clip Any values that are not between -5 & 5 */
+            /* Clip values in matrices to prevent gradient explosion */
             clip(-5, 5, dWxh);
             clip(-5, 5, dWhh);
             clip(-5, 5, dWhy);
@@ -307,7 +307,7 @@ class RNN
             BY = MatrixXd::Zero(vocab_size, 1);
         }
 
-        void learn()
+        const void learn()
         {
 
             mWXH = MatrixXd::Zero(W_XH.rows(), W_XH.cols());
@@ -319,8 +319,8 @@ class RNN
             int n = 0;
             int p = 0;
 
-            long double smooth_loss = -log(1.0/ double(vocab_size)) * double(sequence_length); 
-            long double learning_rate = 0.001;
+            double smooth_loss = -log(1.0/ double(vocab_size)) * double(sequence_length); 
+            double learning_rate = 1 * exp(-1);
             
             MatrixXd h_prev; 
 
@@ -383,7 +383,7 @@ int main()
 
     Eigen::initParallel();
     RNN rnn = RNN(hidden_size, seq_length);
-    rnn.load("code_corpus.txt");
+    rnn.load("input.txt");
     rnn.learn();
 }
 
