@@ -1,3 +1,3 @@
 ### Recurrent Neural Network C++
-
-Still developing
+---
+Documentation coming soon
