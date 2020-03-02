@@ -25,7 +25,7 @@ class RNN
             MatrixXd dWhy;
             MatrixXd dbh;
             MatrixXd dby;
-            MatrixXd hs;            
+            MatrixXd hs;   
         }; 
 
         vector <string> data;
@@ -337,8 +337,8 @@ class RNN
 
                 if (n % 100 == 0)
                 {
-                    auto samples = sample(h_prev, inputs[0], 200);
-                    auto text = concat(samples);
+                    static auto samples = sample(h_prev, inputs[0], 200);
+                    static auto text = concat(samples);
 
                     cout << text << endl;
                     cout << "\n";
@@ -368,10 +368,10 @@ class RNN
                 mBY.noalias() += MatrixXd(item->dby.array() * item->dby.array());
                 BY += MatrixXd(-learning_rate * item->dby.array() / sqrt(mBY.array() + 1e-8));
 
-                free(item);
+                delete(item);
                 
                 p += sequence_length;
-                n++;
+                n ++;
             }
         }
 };
