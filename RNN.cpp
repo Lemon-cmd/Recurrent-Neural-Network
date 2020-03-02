@@ -226,9 +226,11 @@ class RNN
         const string concat(const vector <int> samples)
         {
             string output = "";
-            
+            #pragma omp declare reduction (merge : string : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
+            #pragma omp parallel for reduction (merge : output)
             for (int i = 0; i < samples.size(); i++)
             {
+                #pragma omp critical
                 output += id_char[samples[i]];
             }
 
@@ -288,14 +290,6 @@ class RNN
             data_size = data.size();
             vocab_size = char_id.size();
             
-            #pragma omp declare reduction (merge : vector <int> : omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end()))
-            #pragma omp parallel for reduction (merge : vocab_samples)
-            for (int i = 0; i < vocab_size; i ++)
-            {
-                #pragma omp critical
-                vocab_samples.push_back(i);
-            }
-
             W_XH = MatrixXd::Random(hiddens, vocab_size) * 0.01;
             W_HH = MatrixXd::Random(hiddens, hiddens) * 0.01;
             W_HY = MatrixXd::Random(vocab_size, hiddens) * 0.01;
@@ -316,7 +310,7 @@ class RNN
             int p = 0;
 
             double smooth_loss = -log(1.0/ double(vocab_size)) * double(sequence_length); 
-            double learning_rate = 0.001;
+            double learning_rate = 1 * exp(-1);
             
             MatrixXd h_prev; 
 
