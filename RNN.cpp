@@ -54,7 +54,7 @@ class RNN
 
         void setItem(MatrixXd &m, const int row_num, const double target)
         {
-            for (auto item = m.row(row_num).data(); item< m.row(row_num).data() + m.size(); item += m.outerStride()) 
+            for (auto item = m.row(row_num).data(); item < m.row(row_num).data() + m.size(); item += m.outerStride()) 
             {
                 *item = target;
             }      
@@ -341,6 +341,10 @@ class RNN
                 if (n % 100 == 0)
                 {
                     cout << "Iteration #: "  << n << " Loss: " << smooth_loss << endl;
+
+                    // decreases learning rate as number of iteration increases
+                    learning_rate = learning_rate / (1.0 + (n / 100000) );
+
                 }
 
                 mWXH.noalias() += MatrixXd(item->dWxh.array() * item->dWxh.array());
