@@ -343,7 +343,7 @@ class RNN
                     cout << "Iteration #: "  << n << " Loss: " << smooth_loss << endl;
 
                     // decreases learning rate as number of iteration increases
-                    learning_rate = learning_rate / (1.0 + (n / 100000) );
+                    learning_rate = learning_rate / (1.0 + (n / 1000000) );
 
                 }
 
