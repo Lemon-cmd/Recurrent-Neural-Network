@@ -341,10 +341,12 @@ class RNN
                 if (n % 100 == 0)
                 {
                     cout << "Iteration #: "  << n << " Loss: " << smooth_loss << endl;
-
-                    // decreases learning rate as number of iteration increases
-                    learning_rate = learning_rate / (1.0 + (n / 1000000) );
-
+                }
+                
+                if ((n % 10000 == 0) && (n != 0))
+                {
+                   // decreases learning rate as number of iteration increases
+                   learning_rate = learning_rate / (1.0 + (n / 1000000) );
                 }
 
                 mWXH.noalias() += MatrixXd(item->dWxh.array() * item->dWxh.array());
