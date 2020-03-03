@@ -346,9 +346,9 @@ class RNN
                 if ((n % 10000 == 0) && (n != 0))
                 {
                    // decreases learning rate as number of iteration increases
-                   if (learning_rate >= 0.0001)
+                   if (learning_rate >= 0.000001)
                    {
-                       learning_rate = learning_rate / (1.0 + (n / 1000000) );
+                       learning_rate = learning_rate / (1.0 + (n / (n + 100000)) );
                    }
                    else
                    {
