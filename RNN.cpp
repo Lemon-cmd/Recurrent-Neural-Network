@@ -346,7 +346,16 @@ class RNN
                 if ((n % 10000 == 0) && (n != 0))
                 {
                    // decreases learning rate as number of iteration increases
-                   learning_rate = learning_rate / (1.0 + (n / 1000000) );
+                   if (learning_rate >= 0.0001)
+                   {
+                       learning_rate = learning_rate / (1.0 + (n / 1000000) );
+                   }
+                   else
+                   {
+                       //restart
+                       learning_rate = 1 * exp(-1);
+                   }
+                       
                 }
 
                 mWXH.noalias() += MatrixXd(item->dWxh.array() * item->dWxh.array());
