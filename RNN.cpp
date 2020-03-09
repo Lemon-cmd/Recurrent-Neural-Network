@@ -52,14 +52,6 @@ class RNN
         map <string, int> char_id;
         map <int, string> id_char;
 
-        void setItem(MatrixXd &m, const int row_num, const double target)
-        {
-            for (auto item = m.row(row_num).data(); item < m.row(row_num).data() + m.size(); item += m.outerStride()) 
-            {
-                *item = target;
-            }      
-        }
-
         void clip(const double min, const double max, MatrixXd &target)
         {
             for (int r = 0; r < target.rows(); r ++)
@@ -69,14 +61,6 @@ class RNN
                     *item = check(min, max, *item);
                 }   
             }
-        }
-
-        void addItem(MatrixXd &m, const int row_num, const double target)
-        {
-            for (auto item = m.row(row_num).data(); item< m.row(row_num).data() + m.size(); item += m.outerStride()) 
-            {
-                *item += target;
-            }   
         }
 
         double check (const double min, const double max, double &target)
@@ -391,4 +375,3 @@ int main()
     rnn.load("input.txt");
     rnn.learn();
 }
-
