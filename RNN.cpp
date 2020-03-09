@@ -338,7 +338,7 @@ class RNN
 
                 smooth_loss = smooth_loss * 0.999 + item->loss * 0.001;
 
-                if (n % 100 == 0)
+                if ((n % 100 == 0) && (n != 0))
                 {
                     cout << "Iteration #: "  << n << " Loss: " << smooth_loss << endl;
                 }
@@ -346,14 +346,14 @@ class RNN
                 if ((n % 10000 == 0) && (n != 0))
                 {
                    // decreases learning rate as number of iteration increases
-                   if (learning_rate >= 0.000001)
+                   if (learning_rate >= 0.00000001)
                    {
-                       learning_rate = learning_rate / (1.0 + (n / (n + 100000)) );
+                       learning_rate = learning_rate / (1.0 + (exp(-n/(n - 10000000))));
                    }
                    else
                    {
                        //restart
-                       learning_rate = 1 * exp(-1);
+                       learning_rate = 0.001;
                    }
                        
                 }
