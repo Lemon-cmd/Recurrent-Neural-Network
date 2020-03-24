@@ -262,6 +262,7 @@ class RNN
 
             //set next line into the map and allocate the same ID into both map; then increment the ID
             char_id["\n"] = count; id_char[count] = "\n"; count ++; 
+            char_id[" "] = count; id_char[count] = " "; count ++;
 
             //Loop through the corpus
             //Find Unique characters and allocate it with a unique ID
@@ -271,10 +272,15 @@ class RNN
                 int line_size = line.size();
                 if (line_size > 0)
                 {
-                    for (int c = 0; c < line_size; c++)
+                    int c = 0;
+                    istringstream word(line);
+                    for (string current; word >> current;)
                     {
-                        string current (1, line[c]);
                         data.push_back(current);
+                        if (c < line_size)
+                        {
+                            data.push_back(" ");
+                        }
 
                         if (char_id.find(current) == char_id.end())
                         {
@@ -282,6 +288,7 @@ class RNN
                             id_char[count] = current;
                             count ++;
                         }
+                        c ++;
                     }
 
                     data.push_back("\n");
@@ -301,6 +308,8 @@ class RNN
             W_HY = MatrixXd::Random(vocab_size, hiddens) * 0.01;
             BH = MatrixXd::Zero(hiddens, 1);
             BY = MatrixXd::Zero(vocab_size, 1);
+
+            cout << "Create Topology: Done!" << endl;
         }
 
         const void learn()
@@ -351,17 +360,17 @@ class RNN
                     cout << "Iteration #: "  << n << " Loss: " << smooth_loss << endl;
                 }
                 
-                if ((n % 10000 == 0) && (n != 0))
+                if ((n % 1000000 == 0) && (n != 0))
                 {
                    // decreases learning rate as number of iteration increases
-                   if (learning_rate >= 0.00000001)
+                   if (learning_rate >= 0.0000001)
                    {
-                       learning_rate = learning_rate / (1.0 + (exp(-n/(n - 10000000))));
+                       learning_rate = learning_rate / (1.0 + (exp(-n/(n + 1))));
                    }
                    else
                    {
                        //restart
-                       learning_rate = 0.001;
+                       learning_rate = 0.1;
                    }
                        
                 }
@@ -391,13 +400,18 @@ class RNN
         }
 };
 
-int main()
+int main(int argc, char* argv[])
 {
-    int hidden_size = 120;
-    int seq_length = 25;
+    if (argc != 4)
+    {
+        cout << "Arguments: Corpus File, hidden size, sequence length" << endl;
+        return 0;
+    }
+    //grab arguments and convert char to int for hidden size and sequence length
+    string filename = argv[1]; int hidden_size = atoi(argv[2]); int seq_length = atoi(argv[3]);
 
     Eigen::initParallel();
     RNN rnn = RNN(hidden_size, seq_length);
-    rnn.load("input.txt");
+    rnn.load(filename);
     rnn.learn();
 }
